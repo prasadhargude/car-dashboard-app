@@ -42,7 +42,7 @@
     "cmdk": "latest",
     "embla-carousel-react": "latest",
     "framer-motion": "^11.0.0",
-    "geist": "latest",
+    "geist": "1.5.1",
     "input-otp": "latest",
     "jiti": "latest",
     "less": "latest",
