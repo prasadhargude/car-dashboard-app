@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import CameraFeed from "./CameraFeed"
 import MomentsFeed from "./MomentsFeed"
 import PreviewModal from "./PreviewModal"
 import SocialConnections from "./SocialConnections"
 import Settings from "./Settings"
 import { Camera, Grid3x3, SettingsIcon, Share2 } from "lucide-react"
+import { uploadMoment, fetchMoments } from "../../lib/upload-service"
 
 function Dashboard() {
   const [moments, setMoments] = useState([])
@@ -18,6 +19,19 @@ function Dashboard() {
     facebook: false,
     linkedin: false,
   })
+  const [isUploading, setIsUploading] = useState(false)
+
+  useEffect(() => {
+    const loadMoments = async () => {
+      try {
+        const fetchedMoments = await fetchMoments()
+        setMoments(fetchedMoments)
+      } catch (error) {
+        console.error("[v0] Failed to load moments:", error)
+      }
+    }
+    loadMoments()
+  }, [])
 
   const handleCapture = useCallback(
     (imageUrl, category) => {
@@ -53,9 +67,29 @@ function Dashboard() {
     return options[Math.floor(Math.random() * options.length)]
   }
 
-  const handleSaveMoment = (moment) => {
-    setMoments((prev) => [moment, ...prev])
-    setPreviewMoment(null)
+  const handleSaveMoment = async (moment) => {
+    try {
+      setIsUploading(true)
+      console.log("[v0] Uploading moment to Cloudinary and MongoDB...")
+
+      const result = await uploadMoment(moment.imageUrl, moment.category, moment.caption)
+
+      console.log("[v0] Upload successful:", result)
+
+      const savedMoment = {
+        ...moment,
+        id: result.momentId,
+        imageUrl: result.imageUrl,
+      }
+
+      setMoments((prev) => [savedMoment, ...prev])
+      setPreviewMoment(null)
+    } catch (error) {
+      console.error("[v0] Failed to save moment:", error)
+      alert("Failed to save moment. Please check your environment variables and try again.")
+    } finally {
+      setIsUploading(false)
+    }
   }
 
   const handleDiscardMoment = () => {
@@ -149,6 +183,7 @@ function Dashboard() {
           onDiscard={handleDiscardMoment}
           onPost={handlePostMoment}
           socialConnections={socialConnections}
+          isUploading={isUploading}
         />
       )}
     </div>

@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState } from "react"
 import VoiceAssistant from "./VoiceAssistant"
 import { Camera, SwitchCamera, Circle, AlertCircle, Info } from "lucide-react"
+import { detectGesture, checkMLBackendHealth } from "../../lib/ml-service"
 
 function CameraFeed({ onCapture, cameraMode, setCameraMode }) {
   const videoRef = useRef(null)
@@ -11,6 +12,18 @@ function CameraFeed({ onCapture, cameraMode, setCameraMode }) {
   const [permissionGranted, setPermissionGranted] = useState(false)
   const [error, setError] = useState(null)
   const [permissionState, setPermissionState] = useState("prompt")
+  const [mlBackendAvailable, setMlBackendAvailable] = useState(false)
+  const [gestureDetectionEnabled, setGestureDetectionEnabled] = useState(false)
+  const gestureIntervalRef = useRef(null)
+
+  useEffect(() => {
+    const checkMLHealth = async () => {
+      const health = await checkMLBackendHealth()
+      setMlBackendAvailable(health.status === "healthy" && health.models.gesture)
+      console.log("[v0] ML Backend status:", health)
+    }
+    checkMLHealth()
+  }, [])
 
   useEffect(() => {
     const checkPermission = async () => {
@@ -53,6 +66,60 @@ function CameraFeed({ onCapture, cameraMode, setCameraMode }) {
       }
     }
   }, [cameraMode])
+
+  useEffect(() => {
+    if (!permissionGranted || !gestureDetectionEnabled || !mlBackendAvailable) {
+      if (gestureIntervalRef.current) {
+        clearInterval(gestureIntervalRef.current)
+        gestureIntervalRef.current = null
+      }
+      return
+    }
+
+    console.log("[v0] Starting gesture detection loop")
+    gestureIntervalRef.current = setInterval(async () => {
+      await detectGestureFromFrame()
+    }, 1000) // Check every 1 second
+
+    return () => {
+      if (gestureIntervalRef.current) {
+        clearInterval(gestureIntervalRef.current)
+        gestureIntervalRef.current = null
+      }
+    }
+  }, [permissionGranted, gestureDetectionEnabled, mlBackendAvailable])
+
+  const detectGestureFromFrame = async () => {
+    const canvas = canvasRef.current
+    const video = videoRef.current
+    if (!canvas || !video) return
+
+    try {
+      const ctx = canvas.getContext("2d")
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+      // Convert canvas to blob
+      const blob = await new Promise((resolve) => {
+        canvas.toBlob(resolve, "image/jpeg", 0.8)
+      })
+
+      if (!blob) return
+
+      const result = await detectGesture(blob)
+
+      if (result.action === "capture" && result.confidence > 0.7) {
+        console.log("[v0] Gesture detected:", result.gesture_detected, "confidence:", result.confidence)
+        captureFrame()
+        // Temporarily disable gesture detection to avoid multiple captures
+        setGestureDetectionEnabled(false)
+        setTimeout(() => setGestureDetectionEnabled(true), 3000)
+      }
+    } catch (error) {
+      console.error("[v0] Gesture detection error:", error)
+    }
+  }
 
   const startCamera = async () => {
     try {
@@ -135,6 +202,10 @@ function CameraFeed({ onCapture, cameraMode, setCameraMode }) {
     setCameraMode((prev) => (prev === "inside" ? "outside" : "inside"))
   }
 
+  const toggleGestureDetection = () => {
+    setGestureDetectionEnabled((prev) => !prev)
+  }
+
   return (
     <div className="relative h-full flex flex-col bg-background">
       <div className="relative border-b border-primary/30 bg-card">
@@ -154,6 +225,22 @@ function CameraFeed({ onCapture, cameraMode, setCameraMode }) {
           </div>
 
           <div className="flex items-center gap-3">
+            {mlBackendAvailable && (
+              <button
+                onClick={toggleGestureDetection}
+                className={`px-4 py-2 rounded-md border transition-colors flex items-center gap-2 ${
+                  gestureDetectionEnabled
+                    ? "bg-primary/20 border-primary text-primary"
+                    : "bg-muted border-primary/30 hover:border-primary/60 hover:bg-primary/10"
+                }`}
+                title={gestureDetectionEnabled ? "Disable gesture detection" : "Enable gesture detection"}
+              >
+                <span className="text-lg">{gestureDetectionEnabled ? "✌️" : "🤚"}</span>
+                <span className="text-xs font-mono text-foreground">
+                  {gestureDetectionEnabled ? "GESTURES ON" : "GESTURES OFF"}
+                </span>
+              </button>
+            )}
             <button
               onClick={toggleCameraMode}
               className="px-4 py-2 rounded-md bg-muted border border-primary/30 hover:border-primary/60 hover:bg-primary/10 transition-colors flex items-center gap-2"
@@ -197,6 +284,10 @@ function CameraFeed({ onCapture, cameraMode, setCameraMode }) {
                   <span className="text-muted-foreground">Gestures:</span>
                   <span className="text-lg">✌️</span>
                   <span className="text-lg">👍</span>
+                  {gestureDetectionEnabled && mlBackendAvailable && (
+                    <span className="ml-2 text-primary font-bold">(ACTIVE)</span>
+                  )}
+                  {!mlBackendAvailable && <span className="ml-2 text-muted-foreground">(ML Backend Required)</span>}
                 </div>
               </div>
             </div>
